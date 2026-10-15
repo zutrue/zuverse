@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node bin/zuverse.mjs help)",
+      "Bash(node bin/zuverse.mjs doctor)",
+      "Bash(node bin/zuverse.mjs list)",
+      "Bash(node bin/zuverse.mjs fetch:*)",
+      "Bash(node bin/zuverse.mjs plan:*)",
+      "Bash(node bin/zuverse.mjs set:*)",
+      "Bash(node bin/zuverse.mjs photo:*)",
+      "Bash(node bin/zuverse.mjs cost:*)",
+      "Bash(node bin/zuverse.mjs status:*)",
+      "Bash(node bin/zuverse.mjs direction-rules:*)",
+      "Bash(npm test)"
+    ]
+  }
+}

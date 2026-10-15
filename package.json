@@ -1,0 +1,37 @@
+{
+  "name": "zuverse",
+  "version": "1.0.0",
+  "description": "Reverse-engineer any video ad (TikTok, Instagram, Facebook Ad Library) and remake it shot for shot with a new person, voice and brand. Built for Claude Code. Runs on Zurelay (Gemini 3.1 Pro, GPT Image 2.5, Seedance 2.5).",
+  "type": "module",
+  "bin": {
+    "zuverse": "bin/zuverse.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "doctor": "node bin/zuverse.mjs doctor"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "keywords": [
+    "claude-code",
+    "video-ads",
+    "ad-copier",
+    "seedance",
+    "gpt-image",
+    "gemini",
+    "zurelay",
+    "ugc",
+    "facebook-ads",
+    "tiktok"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zutrue/zuverse"
+  }
+}

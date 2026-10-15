@@ -1,0 +1,11 @@
+{
+  "name": "zuverse",
+  "owner": { "name": "Zutrue", "url": "https://github.com/zutrue" },
+  "plugins": [
+    {
+      "name": "zuverse",
+      "source": ".",
+      "description": "Reverse-engineer any video ad and remake it shot for shot with a new person, voice and brand."
+    }
+  ]
+}

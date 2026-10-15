@@ -1,0 +1,11 @@
+{
+  "name": "zuverse",
+  "version": "1.0.0",
+  "description": "Reverse-engineer any video ad (TikTok, Instagram, Facebook Ad Library) and remake it shot for shot with a new person, voice and brand. Runs on Zurelay: Gemini 3.1 Pro, GPT Image 2.5, Seedance 2.5.",
+  "author": { "name": "Zutrue", "url": "https://github.com/zutrue" },
+  "homepage": "https://github.com/zutrue/zuverse",
+  "repository": "https://github.com/zutrue/zuverse",
+  "license": "MIT",
+  "keywords": ["video-ads", "ad-copier", "seedance", "zurelay", "ugc"],
+  "skills": ["./.claude/skills/"]
+}

@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+!.env.example
+zuverse-projects/
+*.log
+.DS_Store
