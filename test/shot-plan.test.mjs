@@ -9,7 +9,10 @@ import {
   shotFramePrompt,
   shotPlanPrompt,
   SHOT_PLAN_MAX_SHOTS,
+  SHOT_PLAN_SYSTEM,
 } from "../src/shot-plan.mjs";
+import { remakeShots } from "../src/prompt.mjs";
+import { framesToMake, withShotPlan } from "../src/run.mjs";
 
 const includes = (actual, expected, msg) =>
   assert.ok(String(actual).includes(expected), msg ?? `Expected ${JSON.stringify(actual)} to include ${JSON.stringify(expected)}`);
@@ -42,6 +45,42 @@ test("the model's shots go onto the measured cuts; times always come from the cu
   const thin = mergeShotPlan(measured, { shots: [] });
   assert.deepStrictEqual(thin[1].framing, "");
   assert.ok(!planIsUsable(thin));
+});
+
+test("a shot with a person in it is filmed footage, even when the model calls it a graphic", () => {
+  // The arctic-air read: a red caption burned into the talking shot got it flagged as a graphic.
+  const measured = [{ start: 0, end: 26.7 }, { start: 26.7, end: 29 }, { start: 29, end: 30 }];
+  const merged = mergeShotPlan(measured, {
+    shots: [
+      { index: 1, shot_type: "selfie", framing: "chest up", camera: "handheld", subject: "technician", action: "talks to camera", setting: "kitchen", lighting: "daylight", person: true, graphic: true, dialogue: "What is a fair price", on_screen_text: "WHAT IS A FAIR PRICE..." },
+      { index: 2, shot_type: "medium", framing: "chest up", camera: "handheld", subject: "technician", action: "thumbs up", setting: "kitchen", lighting: "daylight", person: true, graphic: false, dialogue: "" },
+      { index: 3, shot_type: "wide", framing: "full screen card", camera: "static", subject: "logo", action: "logo fades in", setting: "white card", lighting: "", person: false, graphic: true, dialogue: "Call today." },
+    ],
+  });
+  assert.deepStrictEqual(merged.map((s) => [s.person, s.graphic]), [[true, false], [true, false], [false, true]]);
+  // The caption is kept as on-screen text, not lost with the shot.
+  assert.deepStrictEqual(merged[0].on_screen_text, "WHAT IS A FAIR PRICE...");
+  // The mapper is told the same thing.
+  includes(SHOT_PLAN_SYSTEM, "Filmed footage with captions, subtitles, stickers or text overlaid on it is NOT a graphic");
+  includes(SHOT_PLAN_SYSTEM, "A shot with a person in it is never a graphic");
+});
+
+test("a captioned talking shot stays in a new version end to end", () => {
+  const measured = [{ start: 0, end: 26.7 }, { start: 26.7, end: 29 }];
+  const merged = mergeShotPlan(measured, {
+    shots: [
+      { index: 1, shot_type: "selfie", framing: "chest up, phone at arm's length", camera: "handheld", subject: "technician", action: "talks to camera", setting: "kitchen", lighting: "daylight", person: true, graphic: true, dialogue: "What is a fair price for a new AC?", on_screen_text: "WHAT IS A FAIR PRICE..." },
+      { index: 2, shot_type: "medium", framing: "chest up", camera: "handheld", subject: "technician", action: "points at the camera", setting: "kitchen", lighting: "daylight", person: true, graphic: false, dialogue: "Call us." },
+    ],
+  }).map((s, i) => ({ ...s, frame_url: `shots/shot-${i + 1}.jpg` }));
+  // Both shots get a frame drawn...
+  assert.deepStrictEqual(framesToMake(merged, "cast/cast.png"), [0, 1]);
+  // ...and both are filmed, on the measured cuts.
+  const { analysis } = withShotPlan({ shots: [] }, merged, 1);
+  const shots = remakeShots(analysis.shots, 29);
+  assert.deepStrictEqual(shots.map((s) => [s.start, s.end]), [[0, 26.7], [26.7, 29]]);
+  includes(shots[0].subject_action, "talks to camera");
+  assert.deepStrictEqual(shots[0].dialogue, "What is a fair price for a new AC?");
 });
 
 test("JSON from a reply: bare, fenced or wrapped in text", () => {

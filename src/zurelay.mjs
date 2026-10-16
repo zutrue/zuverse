@@ -259,11 +259,19 @@ export async function downloadVideo(id) {
   return buffer;
 }
 
-/** Customer-readable reason for a failed video (failed videos are free). */
-export function videoFailureMessage(error) {
+/**
+ * Customer-readable reason for a failed video (failed videos are free).
+ * `mode` is the render's mode: a new version is already made, so it is told to
+ * send no images instead.
+ */
+export function videoFailureMessage(error, { mode = "", project = "<project>" } = {}) {
   const code = String(error?.code ?? "");
   if (code === "content_policy") {
-    return "The video model declined this request under its content rules (failed videos are free). Try other cast photos (cropped head-and-shoulders, everyday clothes), fewer reference images, or Make a new version.";
+    const declined = "The video model declined this request under its content rules (failed videos are free).";
+    if (mode === "new") {
+      return `${declined} Render once more (it can pass on a second try). If it's declined again, run \`zuverse set ${project} images=off\`, then \`zuverse prompt ${project}\` and \`zuverse render ${project} --yes\`: no face or frame is sent and the video model casts the new person from the written plan.`;
+    }
+    return `${declined} Try other cast photos (cropped head-and-shoulders, everyday clothes), fewer reference images, or Make a new version.`;
   }
   if (code === "invalid_image") return "One of the reference images couldn't be used (JPG/PNG/WebP, 300 to 6000 px a side). Failed videos are free.";
   if (code === "generation_timeout") return "The video took too long to make (failed videos are free). Try again.";

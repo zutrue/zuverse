@@ -550,7 +550,7 @@ export async function waitForRender(project, { waitMs = 540_000 } = {}) {
     if (status === "failed") {
       const failed = { ...render, status, error: video?.error ?? null, failedAt: new Date().toISOString() };
       await project.writeJson("render.json", failed);
-      return { status, error: videoFailureMessage(video?.error), render: failed };
+      return { status, error: videoFailureMessage(video?.error, { mode: render.mode, project: project.name }), render: failed };
     }
     if (Date.now() > until) {
       await project.writeJson("render.json", { ...render, status });

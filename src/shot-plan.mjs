@@ -51,7 +51,7 @@ Describe each shot concretely and visually, the way a camera operator would need
 - setting: the place, surfaces, colours, props, condition (dirty, clean)
 - lighting: light source, brightness, colour temperature
 - person: true when a person (face or body, hands count) is visible in the shot
-- graphic: true when the shot is a designed graphic, title card, logo card or end card rather than filmed footage
+- graphic: true only when the whole frame is a designed card (title card, logo card, end card, full-screen graphic) with no filmed scene in it. Filmed footage with captions, subtitles, stickers or text overlaid on it is NOT a graphic, however big the text: set graphic false and put the text in on_screen_text. A shot with a person in it is never a graphic
 - dialogue: the words spoken during this shot, verbatim, or empty
 - on_screen_text: captions or overlays burned in during this shot (they will NOT be recreated), or empty
 Never describe the on-screen captions as part of the scene. Use only ASCII punctuation. Output valid JSON matching the schema.`;
@@ -118,7 +118,10 @@ export function mergeShotPlan(measured, raw) {
       setting: str(s.setting, 300),
       lighting: str(s.lighting, 160),
       person: s.person === true,
-      graphic: s.graphic === true,
+      // A shot with a person in it is filmed footage, whatever text is burned
+      // in: a captioned talking shot flagged graphic would be dropped from a
+      // new version (and its frame never drawn).
+      graphic: s.graphic === true && s.person !== true,
       dialogue: str(s.dialogue, 400),
       on_screen_text: str(s.on_screen_text, 300),
     };
