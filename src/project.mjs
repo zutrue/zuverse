@@ -20,6 +20,9 @@
  *   render-plan.json    what goes with the prompt: reference images, reference video
  *   render.json         the render: Zurelay video id, status, cost
  *   zuverse-*.mp4       the finished videos
+ *   edit.json           the optional edit: what to emphasize, stickers, zooms (written by Claude)
+ *   edit/               the edit's word timings (words.json), overlay (captions.ass) and last result
+ *   zuverse-*-edit-*.mp4  the edited videos
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";

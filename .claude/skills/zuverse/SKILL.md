@@ -1,6 +1,6 @@
 ---
 name: zuverse
-description: Reverse-engineer any video ad (TikTok, Instagram Reel, Facebook Ad Library ad, or a video file) and remake it shot for shot with a new person, voice, brand or place, using the Zuverse CLI on Zurelay (Gemini 3.1 Pro reads the ad, GPT Image 2.5 casts the new person and draws each shot, Seedance 2.5 makes the video). Use when the user wants to copy, clone, remake, recreate, reverse-engineer or "make my own version of" a video ad or short-form video, swap the person in an ad, or break an ad down into its hook, script and shots.
+description: Reverse-engineer any video ad (TikTok, Instagram Reel, Facebook Ad Library ad, or a video file) and remake it shot for shot with a new person, voice, brand or place, using the Zuverse CLI on Zurelay (Gemini 3.1 Pro reads the ad, GPT Image 2.5 casts the new person and draws each shot, Seedance 2.5 makes the video). Use when the user wants to copy, clone, remake, recreate, reverse-engineer or "make my own version of" a video ad or short-form video, swap the person in an ad, or break an ad down into its hook, script and shots. Also, only when the user asks for it, edits the finished video: every pause cut out, word-by-word captions, punch-in zooms, pop-up stickers.
 argument-hint: "[ad link or video file]"
 ---
 
@@ -104,6 +104,9 @@ Ask in one short message (use your question tool if you have one). The defaults 
 4. **Anything else to change?** New lines, a different offer, a different place, outfit, tone, language...
 5. **Length and quality:** `duration` (4-30 s, default the ad's length) and `resolution` (480p/720p/1080p).
    Suggest a 480p draft first when they're unsure: same look, a fraction of the price.
+6. **Edit the finished video too?** Off unless they say yes. If they do, once the video is made you cut every
+   pause out of it and add word-by-word captions, punch-in zooms, a few pop-up stickers and a progress bar
+   (step 7; a few cents for the word timing, the rest runs on their computer). Never edit without a yes.
 
 Apply simple choices with `zuverse set <project> key=value ...` (run `zuverse help` for every setting).
 
@@ -147,7 +150,29 @@ If the render is still going when the command returns, run `zuverse status <proj
 
 Give the user the path to the MP4 and offer next steps: another take (`zuverse render <project> --yes` again:
 same prompt, a new video), a change and re-make (`set` / `direction.json`, then `zuverse prompt` and `render`),
-the other mode, or the final at 720p after a 480p draft.
+the other mode, or the final at 720p after a 480p draft. If they said yes to editing in step 3, go on to step 7;
+if they never answered it, ask once now.
+
+## 7. Edit it (only when they said yes)
+
+You are the editor; the CLI does the cutting and drawing.
+
+1. Run `zuverse edit-rules <project>`. The first time, Gemini times every word of the finished video (a few
+   cents; kept in `edit/words.json`, so re-edits are free). It prints the edit.json rules, then every word with
+   its number and times, `*` for an off-screen voice (a phone call), and each pause with how long it is before
+   and after the cut.
+2. Write `<project folder>/edit.json` by those rules: the 3-8 words to emphasize, 1-3 short stickers (the hook,
+   the offer, the CTA; kept off the face), any pause worth keeping (`keepPauses`), and `maxHold` when a pause is
+   still long after the cut because a sound plays in it (a ringtone, music) and nothing is said there. Work in
+   anything the user asked for (their colours, a sticker's words, no zooms...).
+3. Run `zuverse edit <project>`. It saves `zuverse-<project>-edit-<time>.mp4` (the render is kept as it was).
+4. Look before you hand it over: grab a few frames (the sticker moments, a zoomed part) with ffmpeg and Read
+   them. Stickers must not cover the face, and captions must be readable. Fix edit.json and run `zuverse edit`
+   again if not.
+5. Give them the edited MP4 and say what changed (e.g. "29 s -> 20.5 s, 4 pauses cut, 3 stickers").
+
+`zuverse edit <project> --auto` makes a decent edit without edit.json (numbers and CTA words emphasized, no
+stickers). `--video <file>` edits any video, not just this project's render (their own clip, the original ad).
 
 ## When something fails
 
@@ -159,7 +184,8 @@ the other mode, or the final at 720p after a 480p draft.
   changed and why.
 - **Download failed:** see the Facebook steps above, install yt-dlp, or ask for the video file.
 - **402 / balance:** the user adds credit at https://zurelay.com/app/billing.
-- **429 / 503:** Zurelay is busy; the CLI already retries. Run the step again later.
+- **429 / 503:** Zurelay is busy; the CLI already retries. Run the step again later. (The word timing for an edit
+  moves to Gemini 3.8 Flash on its own when Gemini 3.1 Pro is unavailable.)
 
 ## Use it responsibly
 

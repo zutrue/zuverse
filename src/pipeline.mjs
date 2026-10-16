@@ -7,15 +7,30 @@
  *   frames   "Make a new version": every shot described, then drawn fresh (frames/)
  *   prompt   the video prompt + its references (prompt.txt, render-plan.json)
  *   render   Seedance 2.5 makes the video (zuverse-*.mp4)
+ *   edit     only when asked: pauses cut, captions, zooms, stickers (zuverse-*-edit-*.mp4)
  */
 
-import { rename, mkdir, rm, writeFile, copyFile } from "node:fs/promises";
+import { rename, mkdir, rm, writeFile, copyFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { readAd, tightenScript } from "./analyze.mjs";
 import { detectShots, frameTimeFor } from "./cuts.mjs";
 import { planFrom, sanitizeDirection } from "./direction.mjs";
+import {
+  buildAss,
+  cleanEdit,
+  cleanWords,
+  editFilter,
+  keptSeconds,
+  parseSilences,
+  planKeeps,
+  quietLevel,
+  WORDS_SYSTEM,
+  wordsPrompt,
+  wordsSchema,
+  zoomsFor,
+} from "./edit.mjs";
 import {
   AI_VIDEO_MAX_BYTES,
   dataUrl,
@@ -24,10 +39,13 @@ import {
   muteVideo,
   normalizePhoto,
   probe,
+  quietReport,
   REFERENCE_MAX_SECONDS,
   removeQuietly,
+  renderEdit,
   saveImage,
   shrinkImage,
+  speechLoudness,
   transcodeReference,
 } from "./media.mjs";
 import { aspectFor, castPrompt, imageSize, PHOTO_FORMAT, PHOTO_QUALITY } from "./photo.mjs";
@@ -68,7 +86,7 @@ import {
 } from "./shot-plan.mjs";
 import { getSource } from "./source.mjs";
 import { speakerTurns, voiceFor } from "./voice.mjs";
-import { createVideo, downloadVideo, getVideo, makeImage, MODELS, toolCall, videoFailureMessage } from "./zurelay.mjs";
+import { createVideo, downloadVideo, getVideo, makeImage, MODELS, parseJsonObject, toolCall, videoFailureMessage } from "./zurelay.mjs";
 
 const log = (msg) => process.stderr.write(`${msg}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -540,6 +558,128 @@ export async function waitForRender(project, { waitMs = 540_000 } = {}) {
     }
     await sleep(10_000);
   }
+}
+
+/* ─────────────────────────────── edit ─────────────────────────────── */
+
+/** The video an edit works on: the one given, or the project's latest render. */
+export async function editSource(project, file) {
+  if (file) {
+    const p = path.resolve(file);
+    if (!existsSync(p)) throw new Error(`No such file: ${file}`);
+    return p;
+  }
+  const render = await project.readJson("render.json");
+  const latest = render?.file ? project.resolve(render.file) : null;
+  if (!latest || !existsSync(latest)) {
+    throw new Error(`${project.name} has no finished video yet. Render one first, or edit any file with: zuverse edit ${project.name} --video <file>`);
+  }
+  return latest;
+}
+
+/**
+ * When every word is said (Gemini 3.1 Pro listens), kept in edit/words.json
+ * for that video so the edit can be redone for free.
+ */
+export async function wordsStep(project, video, { again = false } = {}) {
+  const { size } = await stat(video);
+  const key = { video: project.relative(video), bytes: size };
+  const cached = await project.readJson(path.join("edit", "words.json"));
+  if (!again && cached?.words?.length && cached.video === key.video && cached.bytes === key.bytes) return cached.words;
+
+  const info = await probe(video);
+  if (!info.hasAudio) throw new Error("This video has no sound, so there are no pauses to cut or words to caption.");
+  await mkdir(project.file("edit"), { recursive: true });
+  const small = await fitVideoUnder(video, project.file("edit", "video-ai.mp4"), AI_VIDEO_MAX_BYTES);
+  // The render's own script helps the words come back spelled the way they were meant.
+  const render = await project.readJson("render.json");
+  const isRender = render?.file && path.resolve(project.resolve(render.file)) === path.resolve(video);
+  const script = isRender ? (await project.readJson("render-plan.json"))?.script : null;
+
+  const user = [
+    { type: "video_url", video_url: { url: await dataUrl(small) } },
+    { type: "text", text: wordsPrompt({ duration: info.duration, script }) },
+  ];
+  const timeWith = (model) => {
+    log(`Timing every word (${model})...`);
+    return toolCall({
+      model,
+      system: WORDS_SYSTEM,
+      user,
+      tool: { name: "submit_words", description: "Submit every spoken word with its timing.", parameters: wordsSchema() },
+      parse: (raw) => cleanWords(parseJsonObject(raw), info.duration),
+      label: "timing the words",
+      timeoutMs: 600_000,
+      maxTokens: 16_000,
+      temperature: 0,
+    });
+  };
+  // Listening for words is a job the smaller Gemini does well too: it stands in when the big one is down.
+  let model = MODELS.read;
+  let words;
+  try {
+    words = await timeWith(model);
+  } catch (e) {
+    if (e?.status !== 503 && e?.code !== "model_unavailable") throw e;
+    log(`  ${MODELS.read} is unavailable right now; using ${MODELS.text} for the word timing.`);
+    model = MODELS.text;
+    words = await timeWith(model);
+  }
+  if (small !== video) await removeQuietly(small);
+  await project.writeJson(path.join("edit", "words.json"), { ...key, model, timedAt: new Date().toISOString(), words });
+  return words;
+}
+
+/** The edit as it stands: edit.json (unless `auto`), the quiet in the sound, and the parts kept. */
+export async function editPlan(project, video, words, { auto = false } = {}) {
+  const info = await probe(video);
+  let raw = null;
+  if (!auto && project.has("edit.json")) {
+    raw = await project.readJson("edit.json");
+    if (!raw) throw new Error(`${project.file("edit.json")} isn't valid JSON. Fix it, or run with --auto.`);
+  }
+  const edit = cleanEdit(raw ?? {});
+  const level = quietLevel(await speechLoudness(video));
+  const quiet = parseSilences(await quietReport(video, level), info.duration);
+  const keeps = planKeeps(words, quiet, info.duration, edit);
+  return { info, edit, hasEdit: !!raw, level, quiet, keeps, zooms: zoomsFor(keeps, edit) };
+}
+
+/** Cuts the pauses, draws the captions and stickers, and saves zuverse-<project>-edit-<time>.mp4. */
+export async function editStep(project, { video: file, auto = false, again = false } = {}) {
+  const video = await editSource(project, file);
+  const words = await wordsStep(project, video, { again });
+  const plan = await editPlan(project, video, words, { auto });
+  const { info, edit, keeps, zooms } = plan;
+  const width = Math.round(info.width / 2) * 2;
+  const height = Math.round(info.height / 2) * 2;
+
+  await mkdir(project.file("edit"), { recursive: true });
+  await project.writeText(path.join("edit", "captions.ass"), buildAss({ words, keeps, edit, width, height }));
+  const output = project.file(`zuverse-${project.name}-edit-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.mp4`);
+  log(`Cutting ${keeps.length - 1} pause(s), zooming and drawing the captions...`);
+  await renderEdit({
+    input: video,
+    filter: editFilter({ keeps, zooms, width, height, focus: edit.zoomFocus, assFile: "edit/captions.ass", hasAudio: info.hasAudio, loudness: edit.loudness }),
+    output,
+    cwd: project.dir,
+    hasAudio: info.hasAudio,
+  });
+  const result = {
+    video: project.relative(video),
+    file: project.relative(output),
+    from: Math.round(info.duration * 100) / 100,
+    to: keptSeconds(keeps),
+    parts: keeps.length,
+    words: words.length,
+    popups: edit.popups.length,
+    usedEditJson: plan.hasEdit,
+    keeps,
+    zooms,
+    editedAt: new Date().toISOString(),
+  };
+  await project.writeJson(path.join("edit", "last.json"), result);
+  return { ...result, file: output };
 }
 
 /* ─────────────────────────────── photos ─────────────────────────────── */

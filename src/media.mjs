@@ -73,14 +73,14 @@ function need(name) {
 }
 
 /** Runs a tool; resolves with its exit code, stdout (Buffer) and the end of stderr. */
-export function run(bin, args, { input } = {}) {
+export function run(bin, args, { input, cwd, stderrMax = 4000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { windowsHide: true });
+    const child = spawn(bin, args, { windowsHide: true, cwd });
     const out = [];
     let err = "";
     child.stdout.on("data", (d) => out.push(d));
     child.stderr.on("data", (d) => {
-      err = (err + d.toString()).slice(-4000);
+      err = (err + d.toString()).slice(-stderrMax);
     });
     child.on("error", reject);
     child.on("close", (code) => resolve({ code, stdout: Buffer.concat(out), stderr: err }));
@@ -278,6 +278,49 @@ export async function saveImage(bytes, base) {
 /** A smaller JPEG copy (long side at most 1280 px) of an image, for a request that would be too big. */
 export async function shrinkImage(input, output) {
   await ffmpeg(["-i", input, "-frames:v", "1", "-vf", "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'", "-q:v", "3", output]);
+}
+
+/* ─────────────────────────────── edit ─────────────────────────────── */
+
+/** The speech band: hum and most of a music bed's bass are left out of the measuring. */
+const SPEECH_BAND = "highpass=f=120,lowpass=f=5000";
+
+/** Mean loudness (dB) of the speech band, or null when there is no sound. */
+export async function speechLoudness(file) {
+  const r = await run(need("ffmpeg"), ["-hide_banner", "-nostats", "-i", file, "-vn", "-af", `${SPEECH_BAND},volumedetect`, "-f", "null", "-"]);
+  const mean = Number(r.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  return Number.isFinite(mean) ? mean : null;
+}
+
+/** ffmpeg's silencedetect lines for the speech band under `levelDb` (parse them with edit.mjs parseSilences). */
+export async function quietReport(file, levelDb, minSeconds = 0.12) {
+  const r = await run(
+    need("ffmpeg"),
+    ["-hide_banner", "-nostats", "-i", file, "-vn", "-af", `${SPEECH_BAND},silencedetect=noise=${levelDb}dB:d=${minSeconds}`, "-f", "null", "-"],
+    { stderrMax: 1_000_000 },
+  );
+  if (r.code !== 0) throw new Error(`ffmpeg couldn't measure the sound: ${r.stderr.trim().split("\n").pop()}`);
+  return r.stderr;
+}
+
+/**
+ * The edit: `filter` (edit.mjs editFilter) on `input`, run inside `cwd` so the
+ * overlay file can be named by a plain relative path.
+ */
+export async function renderEdit({ input, filter, output, cwd, hasAudio = true }) {
+  const r = await run(
+    need("ffmpeg"),
+    [
+      "-hide_banner", "-loglevel", "error", "-y", "-i", input,
+      "-filter_complex", filter,
+      "-map", "[vout]", ...(hasAudio ? ["-map", "[aout]"] : []),
+      "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+      ...(hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
+      "-movflags", "+faststart", output,
+    ],
+    { cwd },
+  );
+  if (r.code !== 0) throw new Error(`ffmpeg failed while editing: ${r.stderr.trim().split("\n").slice(-3).join(" ")}`);
 }
 
 const MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".mp4": "video/mp4", ".mov": "video/quicktime" };

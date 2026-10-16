@@ -46,6 +46,9 @@ missing (`winget install Gyan.FFmpeg`, `brew install ffmpeg` or `sudo apt instal
    never the same face), or you use your own photos.
 5. **Makes the video.** Seedance 2.5 renders it with the new person speaking in a voice that fits them, and the
    second voice of a phone call kept as a second voice.
+6. **Edits it, if you want.** Off unless you ask: every pause cut out, word-by-word captions that pop, punch-in
+   zooms on the jump cuts, a few stickers and a progress bar. Gemini times the words (a few cents) and Claude
+   picks what to emphasize; ffmpeg does the rest on your computer.
 
 Two ways to remake:
 
@@ -130,6 +133,8 @@ Or in one go: `node bin/zuverse.mjs go "<link>" --mode new --duration 15 --resol
 | `make --yes` | cast + frames + prompt + render |
 | `go <link> --yes` | fetch + read + make |
 | `list` | Your projects |
+| `edit-rules [--video f]` | Optional edit: times the words, shows the pauses it would cut and how to write `edit.json` |
+| `edit [--video f] [--auto]` | Optional edit: cuts every pause, adds captions, zooms, stickers and a progress bar (`zuverse-*-edit-*.mp4`) |
 
 | Setting | Values |
 | --- | --- |
@@ -170,6 +175,9 @@ link ─► fetch ─► clip.mp4 (29 s, sized for Seedance)
                 prompt ─► the voice read from the new face, who says which line
                                    │
                 Seedance 2.5 ─► zuverse-<project>.mp4
+                                   │
+                only if you ask ─► edit: Gemini times every word, ffmpeg measures the quiet,
+                                   Claude writes edit.json ─► zuverse-<project>-edit.mp4
 ```
 
 Some details that make the difference:
@@ -182,6 +190,9 @@ Some details that make the difference:
 - **No text by default.** AI video misspells captions, so on-screen words are left out (turn them on with `text=on`).
 - **Nothing traceable in a new version.** Shot frames are drawn new (same angle, new people, a new place), never
   edits of the original frames, and the presenter is cropped the way the ad crops them.
+- **Cuts that never clip a word.** The edit cuts a pause only where the word timings and the measured quiet agree,
+  so a soft voice on a phone is never cut for silence. Captions are drawn by ffmpeg (real text, spelled right),
+  not by the video model.
 
 ## Troubleshooting
 

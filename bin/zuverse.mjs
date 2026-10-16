@@ -27,11 +27,12 @@ const { cleanSettings, directedAnalysis, needsCast } = await import("../src/run.
 const { listProjects, openProject, projectsRoot } = await import("../src/project.mjs");
 const pipeline = await import("../src/pipeline.mjs");
 const { directionRules, planFrom } = await import("../src/direction.mjs");
+const { editRules } = await import("../src/edit.mjs");
 const { IMAGE_PRICE, PRICES_AS_OF, READ_PRICE, renderResolution, usd, videoCost } = await import("../src/pricing.mjs");
 const { tools } = await import("../src/media.mjs");
 const { api, BILLING_URL, SIGNUP_URL } = await import("../src/zurelay.mjs");
 
-const BOOLEAN_FLAGS = new Set(["yes", "y", "again", "remap", "help", "h", "detach"]);
+const BOOLEAN_FLAGS = new Set(["yes", "y", "again", "remap", "help", "h", "detach", "auto"]);
 
 function parseArgs(argv) {
   const positionals = [];
@@ -230,6 +231,11 @@ const HELP = `Zuverse - reverse-engineer any video ad, then remake it as your ow
   zuverse go <link|file> [settings] --yes fetch + read + make in one go
   zuverse list                            your projects
 
+Edit the finished video (optional, only when you want it; a few cents for the word timing):
+  zuverse edit-rules [project] [--video f] the words with their times, the pauses it would cut, how to write edit.json
+  zuverse edit [project] [--video f]      cut every pause, word-by-word captions, punch-in zooms, stickers, progress bar
+        [--auto] [--again]                  --auto: ignore edit.json; --again: time the words again
+
 Settings (zuverse set, or as --flags on go):
   mode=replace|new        replace: keep the original footage's motion, swap the person (default)
                           new: remake it shot for shot with new people in a new place
@@ -357,6 +363,23 @@ async function main() {
     case "status": {
       const project = open(rest);
       report(await pipeline.waitForRender(project, { waitMs }), project);
+      return;
+    }
+    case "edit-rules": {
+      const project = open(rest);
+      const video = await pipeline.editSource(project, flags.video);
+      const words = await pipeline.wordsStep(project, video, { again: !!flags.again });
+      const plan = await pipeline.editPlan(project, video, words, { auto: !!flags.auto });
+      out(editRules({ words, keeps: plan.keeps, duration: plan.info.duration, quiet: plan.quiet, level: plan.level, edit: plan.hasEdit }));
+      out(`\nVideo: ${video}`);
+      out(`Write ${project.file("edit.json")}, then: zuverse edit ${project.name}`);
+      return;
+    }
+    case "edit": {
+      const project = open(rest);
+      const r = await pipeline.editStep(project, { video: flags.video, auto: !!flags.auto, again: !!flags.again });
+      out(`\nEdited: ${r.from.toFixed(1)} s -> ${r.to.toFixed(1)} s (${r.parts - 1} pause(s) cut), ${r.words} words captioned${r.popups ? `, ${r.popups} sticker(s)` : ""}${r.usedEditJson ? ", from edit.json" : ", default edit"}.`);
+      out(`Done: ${r.file}`);
       return;
     }
     case "make":
