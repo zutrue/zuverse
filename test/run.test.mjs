@@ -324,3 +324,29 @@ test("edits on the remake's clock: beats kept word for word are not counted as c
   const sameWords = { ...read, shots: [{ ...read.shots[0], time_range: "0-6s" }] };
   assert.deepStrictEqual(planEdits(read, sameWords).beats, []);
 });
+
+test("a long measured shot that spans several edited beats carries all of them, in order", () => {
+  const read = {
+    ...analysis,
+    shots: [
+      { time_range: "0-3s", shot_type: "close-up", camera: "static", subject_action: "she makes a bet", setting: "room" },
+      { time_range: "3-13s", shot_type: "close-up", camera: "static", subject_action: "she listens to the phone", setting: "room" },
+      { time_range: "13-23s", shot_type: "close-up", camera: "static", subject_action: "she looks annoyed", setting: "room" },
+      { time_range: "23-29s", shot_type: "close-up", camera: "static", subject_action: "she points at the phone", setting: "room" },
+    ],
+  };
+  const directed = {
+    ...read,
+    shots: [
+      { ...read.shots[0], subject_action: "He makes a bet." },
+      { ...read.shots[1], subject_action: "He listens to the phone." },
+      { ...read.shots[2], subject_action: "He looks annoyed." },
+      { ...read.shots[3], subject_action: "He points at the phone." },
+    ],
+  };
+  const edits = planEdits(read, directed);
+  const [long, short] = applyPlanEdits([{ start: 0, end: 26.7, person: true, action: "x" }, { start: 26.7, end: 29, person: true, action: "y" }], edits);
+  // The last beat (23-29s) is mostly in the short shot, so it stays there.
+  assert.equal(long.action, "He makes a bet. Then He listens to the phone. Then He looks annoyed.");
+  assert.equal(short.action, "He points at the phone.");
+});

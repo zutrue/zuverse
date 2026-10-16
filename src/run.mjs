@@ -148,10 +148,28 @@ export function planEdits(original, final) {
   return out;
 }
 
-/** The edited beat a measured shot falls in (by its middle, on the edited plan's clock), if any. */
+/**
+ * The edited beat a measured shot falls in (by its middle, on the edited
+ * plan's clock), if any. A long shot that spans several edited beats (the cut
+ * finder misses jump cuts within one room) carries all of them, in order.
+ */
 export function editFor(shot, edits) {
-  const mid = ((Number(shot.start) + Number(shot.end)) / 2) * (edits.scale ?? 1);
-  return edits.beats.find((b) => mid >= b.range[0] && mid < b.range[1]);
+  const k = edits.scale ?? 1;
+  const from = Number(shot.start) * k;
+  const to = Number(shot.end) * k;
+  const mid = (from + to) / 2;
+  const single = edits.beats.find((b) => mid >= b.range[0] && mid < b.range[1]);
+  const inside = edits.beats
+    .filter((b) => Math.min(to, b.range[1]) - Math.max(from, b.range[0]) >= (b.range[1] - b.range[0]) * 0.8)
+    .sort((a, b) => a.range[0] - b.range[0]);
+  if (inside.length < 2) return single;
+  const actions = inside.map((b) => String(b.action ?? "").trim().replace(/[.\s]+$/, "")).filter(Boolean);
+  const texts = inside.filter((b) => b.onScreenText !== undefined).map((b) => b.onScreenText).filter(Boolean);
+  return {
+    range: [inside[0].range[0], inside[inside.length - 1].range[1]],
+    action: actions.length ? `${actions.join(". Then ")}.` : undefined,
+    onScreenText: inside.some((b) => b.onScreenText !== undefined) ? texts.join(" / ") : undefined,
+  };
 }
 
 /** What a shot's frame must show that the original frame does not ("" = nothing). */
