@@ -14,6 +14,7 @@
 
 import { isFreshFrame } from "./shot-plan.mjs";
 import {
+  adaptScriptForBrand,
   applyVoicePlan,
   buildRecreationPrompt,
   copierMode,
@@ -298,7 +299,14 @@ export function buildRunPrompt(o) {
   if (settings.mode === "new" && o.planShots?.length) {
     // The measured shots replace the read's beats, so the user's beat edits are carried onto them.
     const edits = planEdits(o.originalAnalysis ?? o.analysis, directed);
-    const shots = applyPlanEdits(settings.sendImages ? o.planShots : o.planShots.map((s) => ({ ...s, clean_url: null })), edits);
+    // The mapped shots hold the ad's own words: the brand is swapped or taken out of them like the script.
+    const said = (d) => adaptScriptForBrand(d, directed.brand_mentions, settings.companyName || undefined, settings.removeBranding);
+    const mapped = o.planShots.map((s) => ({
+      ...s,
+      ...(s.dialogue ? { dialogue: said(s.dialogue) } : {}),
+      ...(settings.sendImages ? {} : { clean_url: null }),
+    }));
+    const shots = applyPlanEdits(mapped, edits);
     let planned = withShotPlan(directed, shots, photos.length);
     // Frames that already show the presenter carry their face: the photo
     // itself stays home (with it, nine images of one person tripped the video

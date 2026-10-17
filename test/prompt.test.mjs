@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  adaptScriptForBrand,
   applyVoicePlan,
   buildRecreationPrompt,
   copierMode,
@@ -15,6 +16,7 @@ import {
   NO_TEXT_OVERLAY_RULES,
   planHasOnScreenText,
   remakeShots,
+  shotsSayScript,
   speakersSection,
   stripOnScreenText,
   videoShowsText,
@@ -360,4 +362,44 @@ test("no text: the prompt carries no on-screen text, no text extras, and tells R
   assert.ok(!on.includes("@Video1 may have"));
   const onFresh = buildRecreationPrompt(withText, { ...base, noText: false, mode: "new" });
   includes(onFresh, 'On-screen text: "20 YEARS OLD"');
+});
+
+test("brand removed: a name said on its own goes, and the line still reads", () => {
+  const air = ["Arctic Air Home Services"];
+  const acme = ["Acme", "Acme Roofing"];
+  const out = (s, m) => adaptScriptForBrand(s, m, undefined, true);
+  assert.deepStrictEqual(out("They won't give me a price over the phone. Arctic Air Home Services. How can I help?", air), "They won't give me a price over the phone. How can I help?");
+  assert.deepStrictEqual(out("Good afternoon, thank you for calling Arctic Air Home Services. This is Amanda.", air), "Good afternoon, thank you for calling. This is Amanda.");
+  assert.deepStrictEqual(out("Acme, how can I help?", acme), "How can I help?");
+  assert.deepStrictEqual(out("This is Acme, how can I help?", acme), "How can I help?");
+  assert.deepStrictEqual(out("Hi, this is Acme Roofing. What do you need?", acme), "Hi. What do you need?");
+  assert.deepStrictEqual(out("Welcome to Acme! We fix roofs.", acme), "Welcome! We fix roofs.");
+  assert.deepStrictEqual(out("Acme's crew was great, and Acme's price was fair.", acme), "Our crew was great, and our price was fair.");
+  // Anywhere else the name becomes "us", the longest name first.
+  assert.deepStrictEqual(out("Call Acme Roofing today.", acme), "Call us today.");
+  // Words without the brand are left exactly as they were.
+  assert.deepStrictEqual(out("No brand here, e.g.: fine.", acme), "No brand here, e.g.: fine.");
+});
+
+test("brand swapped: the company goes where the name was; neither switch leaves it", () => {
+  assert.deepStrictEqual(adaptScriptForBrand("Thanks for calling Acme. Acme's the best.", ["Acme"], "Peak Roofing", false), "Thanks for calling Peak Roofing. Peak Roofing's the best.");
+  assert.deepStrictEqual(adaptScriptForBrand("Call Acme.", ["Acme"], undefined, false), "Call Acme.");
+});
+
+test("a new version leaves out per-shot words that aren't the script being spoken", () => {
+  const script = "Come and join me for thirty seconds cleaning some air ducts.";
+  const shot = (dialogue, start, end) => ({ start, end, shot_type: "selfie", camera: "handheld", subject_action: "talks", person: true, dialogue });
+  const same = { ...analysis, adapted_script: script, shots: [shot("Come and join me for 30", 0, 2), shot("seconds cleaning some air ducts.", 2, 10)] };
+  // Give or take a word ("30" for "thirty"), the shots say the script: their words go in.
+  assert.ok(shotsSayScript(same.shots, script));
+  includes(buildRecreationPrompt(same, { ...base, durationSeconds: 10, script, mode: "new" }), 'Says: "Come and join me for 30"');
+  // The shots hold the ad's longer words and the script condenses them: only DIALOGUE has words.
+  const verbatim = {
+    ...same,
+    shots: [shot("Okay so, um, come on and join me today for like thirty whole seconds while I clean out", 0, 2), shot("some really dirty air ducts in this house, it's gonna be fun.", 2, 10)],
+  };
+  assert.ok(!shotsSayScript(verbatim.shots, script));
+  const p = buildRecreationPrompt(verbatim, { ...base, durationSeconds: 10, script, mode: "new" });
+  assert.ok(!p.includes("Says:"), p);
+  assert.deepStrictEqual(dialogueFromPrompt(p), script);
 });

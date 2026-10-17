@@ -350,3 +350,29 @@ test("a long measured shot that spans several edited beats carries all of them, 
   assert.equal(long.action, "He makes a bet. Then He listens to the phone. Then He looks annoyed.");
   assert.equal(short.action, "He points at the phone.");
 });
+
+test("prompt: a new version's mapped shots lose the brand like the script does", () => {
+  const mapped = [
+    { start: 0, end: 10, shot_type: "selfie", subject: "Woman.", action: "listens to the phone", person: true, dialogue: "Thanks for calling Acme. How can I help?", frame_url: "https://x/f1.jpg" },
+    { start: 10, end: 20, shot_type: "selfie", subject: "Woman.", action: "hangs up", person: true, dialogue: "Okay, thanks.", frame_url: "https://x/f2.jpg" },
+  ];
+  // The pipeline hands over the read with its script already branded.
+  const read = (script) => ({ ...analysis, original_script: "Thanks for calling Acme. How can I help? Okay, thanks.", adapted_script: script, brand_mentions: ["Acme"] });
+  const removed = buildRunPrompt({
+    settings: cleanSettings({ mode: "new", durationSeconds: 20, removeBranding: true }),
+    analysis: read("Thanks for calling. How can I help? Okay, thanks."),
+    planShots: mapped,
+    hasSourceVideo: false,
+  });
+  includes(removed.prompt, 'Says: "Thanks for calling. How can I help?"');
+  assert.ok(!/Says: "[^"]*Acme/.test(removed.prompt), removed.prompt);
+  const swapped = buildRunPrompt({
+    settings: cleanSettings({ mode: "new", durationSeconds: 20, companyName: "Peak Roofing" }),
+    analysis: read("Thanks for calling Peak Roofing. How can I help? Okay, thanks."),
+    planShots: mapped,
+    hasSourceVideo: false,
+  });
+  includes(swapped.prompt, 'Says: "Thanks for calling Peak Roofing. How can I help?"');
+  // The shots passed in are left as they were.
+  assert.deepStrictEqual(mapped[0].dialogue, "Thanks for calling Acme. How can I help?");
+});

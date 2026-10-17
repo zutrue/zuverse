@@ -77,7 +77,8 @@ function escapeRegExp(s) {
 
 /**
  * Swap (or strip) brand names in the dialogue. Brand mentions come from the
- * read; the name is substituted in place, or "us" when the brand is removed.
+ * read; the name is substituted in place, or taken out when the brand is
+ * removed (see withoutBrand).
  */
 export function adaptScriptForBrand(script, brandMentions, companyName, removeBranding) {
   let out = String(script ?? "");
@@ -87,12 +88,38 @@ export function adaptScriptForBrand(script, brandMentions, companyName, removeBr
     // longest first so "Acme Roofing" is replaced before "Acme"
     .sort((a, b) => b.length - a.length);
   if (!mentions.length) return out;
-  const replacement = companyName?.trim() ? companyName.trim() : removeBranding ? "us" : "";
-  if (!replacement) return out;
+  const company = companyName?.trim();
+  if (!company && !removeBranding) return out;
   for (const m of mentions) {
-    out = out.replace(new RegExp(`\\b${escapeRegExp(m)}\\b`, "gi"), replacement);
+    out = company ? out.replace(new RegExp(`\\b${escapeRegExp(m)}\\b`, "gi"), company) : withoutBrand(out, escapeRegExp(m));
   }
   return out.replace(/\s{2,}/g, " ").trim();
+}
+
+const SENTENCE_START = String.raw`(^|[.!?]\s+)`;
+const CLAUSE_END = String.raw`(?=[.,!?;:]|\s*$)`;
+const upperFirst = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/**
+ * One brand (a regex source) taken out of the dialogue so every line still
+ * reads: a name said on its own as a phone greeting goes ("Acme. How can I
+ * help?" -> "How can I help?", "thanks for calling Acme." -> "thanks for
+ * calling."), "Acme's" becomes "our", and anywhere else the name becomes "us".
+ */
+function withoutBrand(text, m) {
+  if (!new RegExp(String.raw`\b${m}`, "i").test(text)) return text;
+  return text
+    .replace(new RegExp(String.raw`\bcalling\s+${m}${CLAUSE_END}`, "gi"), "calling")
+    .replace(new RegExp(String.raw`\b(welcome|here)\s+(?:to|at)\s+${m}${CLAUSE_END}`, "gi"), "$1")
+    .replace(new RegExp(String.raw`\b(?:this is|you've reached|you have reached)\s+${m}${CLAUSE_END}`, "gi"), "")
+    .replace(new RegExp(String.raw`${SENTENCE_START}${m}(?:[.,!?;:]+\s*|\s*$)(\p{Ll}?)`, "giu"), (_, lead, next) => lead + next.toUpperCase())
+    .replace(new RegExp(String.raw`,\s*${m}(?=[.!?]|\s*$)`, "gi"), "")
+    .replace(new RegExp(String.raw`\b${m}['’]s\b`, "gi"), (_, at, all) => (/(^|[.!?]\s+)$/.test(all.slice(0, at)) ? "Our" : "our"))
+    .replace(new RegExp(String.raw`\b${m}\b`, "gi"), "us")
+    // The punctuation a removed name leaves behind: "Hi, .", "Hi! ." and a leading ", how".
+    .replace(/,\s*(?=[.!?])/g, "")
+    .replace(/([.!?])(?:\s+[.!?])+/g, "$1")
+    .replace(/(^|[.!?])\s*[,;:]\s*(\p{Ll}?)/gu, (_, end, next) => `${end}${end ? " " : ""}${upperFirst(next)}`);
 }
 
 function ratioLabel(aspectRatio) {
@@ -389,6 +416,27 @@ export function remakeShots(shots, durationSeconds) {
   }));
 }
 
+const wordsOf = (s) => String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}'\s]/gu, " ").split(/\s+/).filter(Boolean);
+
+/**
+ * Whether the shots' words are the script being spoken, give or take a word
+ * ("30" for "thirty"). The shot map has the ad's words verbatim; the script is
+ * often a condensed version of them, and both in one prompt are two scripts.
+ */
+export function shotsSayScript(shots, script) {
+  const a = wordsOf((shots ?? []).map((s) => s?.dialogue ?? "").join(" "));
+  const b = wordsOf(script);
+  if (!a.length || !b.length) return false;
+  // The most words the two share in the same order (longest common subsequence).
+  let prev = new Array(b.length + 1).fill(0);
+  for (const w of a) {
+    const row = [0];
+    for (let j = 0; j < b.length; j++) row.push(w === b[j] ? prev[j] + 1 : Math.max(prev[j + 1], row[j]));
+    prev = row;
+  }
+  return (2 * prev[b.length]) / (a.length + b.length) >= 0.85;
+}
+
 /** "SHOT 2 (2.3-4.3s), like @Image3: POV. Looking straight down ... Says: "..."" */
 function remakeShotLine(s, i, withWords, withText = false) {
   const time = Number.isFinite(s.start) && Number.isFinite(s.end)
@@ -567,10 +615,11 @@ export function buildRecreationPrompt(a, o) {
   const shots = (a.shots ?? []).filter((s) => s && (s.subject_action || s.camera));
   if (fresh) {
     if (freshShots.length) {
-      // Words per shot only while the script is the source's own (an edited
-      // script would fight them); the DIALOGUE section always has the words.
+      // Words per shot only while the script is the source's own and the shots
+      // say it (an edited or condensed script would fight them); the DIALOGUE
+      // section always has the words.
       const ownScript = (a.adapted_script || a.condensed_script || "").trim();
-      const wordsPerShot = speaks && String(script).trim() === ownScript;
+      const wordsPerShot = speaks && String(script).trim() === ownScript && shotsSayScript(freshShots, script);
       lines.push(
         `SHOT LIST (${freshShots.length} shot${freshShots.length === 1 ? "" : "s"}, a hard cut between each; follow the order and timing exactly${directed ? "; where the user's direction differs, the direction wins" : ""}):`,
       );
